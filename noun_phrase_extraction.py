@@ -1,7 +1,7 @@
 import argparse
 
 
-def noun_phrase_extract(input_file):
+def noun_phrase_extract(tokens, labels):
     tokens = []
     labels = []
     noun_phrases = []
@@ -38,6 +38,24 @@ def noun_phrase_extract(input_file):
             pos += 1
     
     return noun_phrases
+
+
+def eval_metrics(pred_files, origin_files=None):
+    """compute the evaluation metrics"""
+
+    pred_nps = []
+    if origin_files:
+        origin_nps = []
+    # First deal with predict_files.
+    pred_labels = []
+    pred_tokens = []
+    with open(predict_files, "r") as f_in:
+        pred_label = []
+        pred_token = []
+        for l in f_in:
+            l = l.rstrip().split()
+            tokens.append(l[0])
+            labels.append(l[1])
 
 
 def main():
