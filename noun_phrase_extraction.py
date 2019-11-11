@@ -11,28 +11,31 @@ def noun_phrase_extract(input_file):
             tokens.append(l[0])
             labels.append(l[1])
     pos = 0
-    while i < len(labels):
-        if labels[i] in ["NN", "NNS", "NP", "NPS"]:
-            noun_phrase = labels[i]
-            if labels[i] in ["NP", "NPS"]:
-                npos = i+1
-                while npos < len(labels) and labels[npos] in ["NP", "NPS"]:
-                    noun_phrase = " ".join([noun_phrase, labels[npos]])
+    while pos < len(labels):
+        cur_pos = pos
+        if labels[pos] in ["NN", "NNS", "NP", "NPS"]:
+            noun_phrase = tokens[pos]
+            if labels[pos] in ["NP", "NPS"]:
+                npos = pos+1
+                while npos < len(labels) and labels[npos] in ["NP", "NPS", "CD"]:
+                    noun_phrase = " ".join([noun_phrase, tokens[npos]])
                     npos += 1
                 noun_phrases.append(noun_phrase)
-                i = npos
-            elif labels[i] in ["NN", "NNS"]:
-                noun_phrase = labels[i]
-                prev = i-1
+                pos = npos
+            elif labels[pos] in ["NN", "NNS"]:
+                noun_phrase = tokens[pos]
+                prev = pos-1
                 # concantenate CD/JJ/JJS/NP/NPS with noun phrase
                 if prev >= 0 and labels[prev] in ["CD", "JJ", "JJS", "NP", "NPS"]:
-                    noun_phrase = " ".join([labels[prev], noun_phrase])
-                npos = i+1
-                while npos < len(labels) and labels[npos] in ["NN", "NNS"]:
-                    noun_phrase = " ".join([noun_phrase, labels[npos]])
+                    noun_phrase = " ".join([tokens[prev], noun_phrase])
+                npos = pos+1
+                while npos < len(labels) and labels[npos] in ["NN", "NNS", "CD"]:
+                    noun_phrase = " ".join([noun_phrase, tokens[npos]])
                     npos += 1
                 noun_phrases.append(noun_phrase)
-                i = npos
+                pos = npos
+        if pos == cur_pos:
+            pos += 1
     
     return noun_phrases
 
