@@ -1,9 +1,9 @@
 export MAX_LENGTH=128
-export BERT_MODEL=bert-base-multilingual-cased
-export OUTPUT_DIR=germeval-model
-export BATCH_SIZE=32
-export NUM_EPOCHS=1
-export SAVE_STEPS=750
+export BERT_MODEL=bert-base-uncased
+export OUTPUT_DIR=germeval-model-crf
+export BATCH_SIZE=8
+export NUM_EPOCHS=10
+export SAVE_STEPS=50
 export SEED=1
 
 python3 run_ner.py --data_dir ./ \

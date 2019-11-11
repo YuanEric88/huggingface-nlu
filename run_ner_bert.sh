@@ -1,5 +1,5 @@
 export MAX_LENGTH=128
-export BERT_MODEL=bert-base-multilingual-cased
+export BERT_MODEL=bert-base-uncased
 export OUTPUT_DIR=germeval-model-bert
 export BATCH_SIZE=32
 export NUM_EPOCHS=3

@@ -274,28 +274,34 @@ def evaluate(args, model, tokenizer, labels, pad_token_label_id, mode, prefix=""
                       # XLM and RoBERTa don"t use segment_ids
                       "labels": batch[3]}
             outputs = model(**inputs)
-            tmp_eval_loss, logits, batch_preds = outputs
+            if args.model_type == "bert":
+                tmp_eval_loss, logits = outputs
+            else:
+                tmp_eval_loss, logits, batch_preds = outputs
 
             if args.n_gpu > 1:
                 tmp_eval_loss = tmp_eval_loss.mean()  # mean() to average on multi-gpu parallel evaluating
 
             eval_loss += tmp_eval_loss.item()
         nb_eval_steps += 1
-        # if preds is None:
-        #     preds = logits.detach().cpu().numpy()
-        #     out_label_ids = inputs["labels"].detach().cpu().numpy()
-        # else:
-        #     preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-        #     out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
-        if preds is None:
-            preds = np.array(batch_preds)
-            out_label_ids = inputs["labels"].detach().cpu().numpy()
-        else:
-            preds = np.append(preds, np.array(batch_preds), axis=0)
-            out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
+        if args.model_type == "bert":
+            if preds is None:
+                preds = logits.detach().cpu().numpy()
+                out_label_ids = inputs["labels"].detach().cpu().numpy()
+            else:
+                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
+        elif args.model_type == "bert_crf":
+            if preds is None:
+                preds = np.array(batch_preds)
+                out_label_ids = inputs["labels"].detach().cpu().numpy()
+            else:
+                preds = np.append(preds, np.array(batch_preds), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
         
     eval_loss = eval_loss / nb_eval_steps
-    # preds = np.argmax(preds, axis=2)
+    if args.model_type == "bert":
+        preds = np.argmax(preds, axis=2)
 
     label_map = {i: label for i, label in enumerate(labels)}
 
