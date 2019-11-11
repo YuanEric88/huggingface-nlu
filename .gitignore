@@ -2,3 +2,6 @@ ner_data
 __pycache__
 *.txt
 runs/
+cached*
+germeval*
+bert_small_cache
