@@ -81,6 +81,22 @@ def read_examples_from_file(data_dir, mode):
     return examples
 
 
+def read_examples_from_list(data_list, mode, labels_list=None):
+    guid_index = 1
+    examples = []
+    for i, words in enumerate(data_list):
+        if labels_list:
+            labels = labels_list[i]
+        else:
+            labels = ["O"] * len(words)
+        if words:
+            examples.append(InputExample(guid="%s-%d".format(mode, guid_index),
+                                            words=words,
+                                            labels=labels))
+        guid_index += 1
+    return examples
+
+
 def convert_examples_to_features(examples,
                                  label_list,
                                  max_seq_length,

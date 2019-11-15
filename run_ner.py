@@ -32,7 +32,7 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
-from utils_ner import convert_examples_to_features, get_labels, read_examples_from_file
+from utils_ner import convert_examples_to_features, get_labels, read_examples_from_file, read_examples_from_list
 
 from transformers import AdamW, WarmupLinearSchedule
 from transformers import WEIGHTS_NAME, BertConfig, BertForTokenClassification, BertTokenizer, BasicTokenizer
@@ -328,6 +328,79 @@ def evaluate(args, model, tokenizer, labels, pad_token_label_id, mode, prefix=""
     return results, preds_list
 
 
+def predict(args, data_list, model, tokenizer, labels, pad_token_label_id, mode, prefix="", label=None):
+    """Receive a list of data and predict the label, suitable for receiving upstream data from cobot"""
+    examples = read_examples_from_list(data_list, mode, label)
+    features = convert_examples_to_features(examples, labels, args.max_seq_length, tokenizer,
+                                                cls_token_at_end=bool(args.model_type in ["xlnet"]),
+                                                # xlnet has a cls token at the end
+                                                cls_token=tokenizer.cls_token,
+                                                cls_token_segment_id=2 if args.model_type in ["xlnet"] else 0,
+                                                sep_token=tokenizer.sep_token,
+                                                sep_token_extra=bool(args.model_type in ["roberta"]),
+                                                # roberta uses an extra separator b/w pairs of sentences, cf. github.com/pytorch/fairseq/commit/1684e166e3da03f5b600dbb7855cb98ddfcd0805
+                                                pad_on_left=bool(args.model_type in ["xlnet"]),
+                                                # pad on the left for xlnet
+                                                pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
+                                                pad_token_segment_id=4 if args.model_type in ["xlnet"] else 0,
+                                                pad_token_label_id=pad_token_label_id
+                                                )
+    preds = None
+    out_label_ids = None
+    model.eval()
+    for feature in features:
+        with torch.no_grad():
+            inputs = {
+                "input_ids": feature.input_ids,
+                "attention_mask": feature.input_ids,
+                "token_type_ids": feature.segment_ids,
+                "labels": feature.label_ids
+            }
+            outputs = model(**inputs)
+            if args.model_type == "bert":
+                tmp_eval_loss, logits = outputs
+            else:
+                tmp_eval_loss, logits, batch_preds = outputs
+
+            if args.n_gpu > 1:
+                tmp_eval_loss = tmp_eval_loss.mean()  # mean() to average on multi-gpu parallel evaluating
+
+            eval_loss += tmp_eval_loss.item()
+        nb_eval_steps += 1
+        if args.model_type == "bert":
+            if preds is None:
+                preds = logits.detach().cpu().numpy()
+                out_label_ids = inputs["labels"].detach().cpu().numpy()
+            else:
+                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
+        elif args.model_type == "bert_crf":
+            if preds is None:
+                preds = np.array(batch_preds)
+                out_label_ids = inputs["labels"].detach().cpu().numpy()
+            else:
+                preds = np.append(preds, np.array(batch_preds), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
+        
+    eval_loss = eval_loss / nb_eval_steps
+    if args.model_type == "bert":
+        preds = np.argmax(preds, axis=2)
+
+    label_map = {i: label for i, label in enumerate(labels)}
+
+    out_label_list = [[] for _ in range(out_label_ids.shape[0])]
+    preds_list = [[] for _ in range(out_label_ids.shape[0])]
+
+    for i in range(out_label_ids.shape[0]):
+        for j in range(out_label_ids.shape[1]):
+            if out_label_ids[i, j] != pad_token_label_id:
+                out_label_list[i].append(label_map[out_label_ids[i][j]])
+                preds_list[i].append(label_map[preds[i][j]])
+
+    return preds_list
+
+
+
 def load_and_cache_examples(args, tokenizer, labels, pad_token_label_id, mode):
     if args.local_rank not in [-1, 0] and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
@@ -404,6 +477,8 @@ def main():
                         help="Whether to run eval on the dev set.")
     parser.add_argument("--do_predict", action="store_true",
                         help="Whether to run predictions on the test set.")
+    parser.add_argument("--online_predict", default=False,
+                        help="Whether to run predict in cobot task.")
     parser.add_argument("--evaluate_during_training", action="store_true",
                         help="Whether to run evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action="store_true",
@@ -491,7 +566,7 @@ def main():
     # Set seed
     set_seed(args)
 
-    # Prepare CONLL-2003 task
+    # Prepare PenTree bank task
     labels = get_labels(args.labels)
     num_labels = len(labels)
     # Use cross entropy ignore index as padding label id so that only real label ids contribute to the loss later
@@ -570,7 +645,18 @@ def main():
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         model = model_class.from_pretrained(args.output_dir)
         model.to(args.device)
+        if args.online_predict:
+            data_list = [
+                ["bC3Pierre", "Vinken", ",", "61", "years", "old", "will"],
+                ["bC3Pierre", "Vinken", ",", "61", "years", "old", "will"]
+            ]
+            predictions = predict(args, data_list, model, tokenizer, labels, pad_token_label_id, mode="test")
+            print(predictions)
+            return
         result, predictions = evaluate(args, model, tokenizer, labels, pad_token_label_id, mode="test")
+        # print(result)
+        # print(predictions)
+        # return None
         # Save results
         output_test_results_file = os.path.join(args.output_dir, "test_results.txt")
         with open(output_test_results_file, "w") as writer:
