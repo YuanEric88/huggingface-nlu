@@ -31,13 +31,15 @@ from tensorboardX import SummaryWriter
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
+from torchcrf import CRF
 from tqdm import tqdm, trange
-from utils_ner import convert_examples_to_features, get_labels, read_examples_from_file, read_examples_from_list
 
+from utils_ner import convert_examples_to_features, get_labels, read_examples_from_file, read_examples_from_list
+from np_utils import noun_phrase_extract
 from transformers import AdamW, WarmupLinearSchedule
 from transformers import WEIGHTS_NAME, BertConfig, BertForTokenClassification, BertTokenizer, BasicTokenizer
 from transformers.modeling_bert import BertModel, BertPreTrainedModel
-from torchcrf import CRF
+
 # from transformers import RobertaConfig, RobertaForTokenClassification, RobertaTokenizer
 
 logger = logging.getLogger(__name__)
@@ -350,23 +352,19 @@ def predict(args, data_list, model, tokenizer, labels, pad_token_label_id, mode,
     model.eval()
     for feature in features:
         with torch.no_grad():
+            input_length = len(feature.input_ids)
             inputs = {
-                "input_ids": feature.input_ids,
-                "attention_mask": feature.input_ids,
-                "token_type_ids": feature.segment_ids,
-                "labels": feature.label_ids
+                "input_ids": torch.tensor(feature.input_ids, device=args.device).view(1, input_length),
+                "attention_mask": torch.tensor(feature.input_mask, device=args.device).view(1, input_length),
+                "token_type_ids": torch.tensor(feature.segment_ids, device=args.device).view(1, input_length),
+                "labels": torch.tensor(feature.label_ids, device=args.device).view(1, input_length)
             }
             outputs = model(**inputs)
             if args.model_type == "bert":
-                tmp_eval_loss, logits = outputs
+                _, logits = outputs
             else:
-                tmp_eval_loss, logits, batch_preds = outputs
+                _, logits, batch_preds = outputs
 
-            if args.n_gpu > 1:
-                tmp_eval_loss = tmp_eval_loss.mean()  # mean() to average on multi-gpu parallel evaluating
-
-            eval_loss += tmp_eval_loss.item()
-        nb_eval_steps += 1
         if args.model_type == "bert":
             if preds is None:
                 preds = logits.detach().cpu().numpy()
@@ -382,7 +380,6 @@ def predict(args, data_list, model, tokenizer, labels, pad_token_label_id, mode,
                 preds = np.append(preds, np.array(batch_preds), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
         
-    eval_loss = eval_loss / nb_eval_steps
     if args.model_type == "bert":
         preds = np.argmax(preds, axis=2)
 
@@ -647,17 +644,15 @@ def main():
         model.to(args.device)
         if args.online_predict:
             data_list = [
-                ["bC3Pierre", "Vinken", ",", "61", "years", "old", "will"],
-                ["bC3Pierre", "Vinken", ",", "61", "years", "old", "will"]
+                ["bC3Pierre", "Vinken", ",", "61", "years", "old", ",", "will", "join", "the", "board", "as", "a", "nonexecutive", "director", "Nov.", "29", "."],
+                ["Mr.", "Vinken", "is", "chairma", "of", "Elsevier", "N.V.", ",", "the", "Dutch", "publishing", "group", "."]
             ]
             predictions = predict(args, data_list, model, tokenizer, labels, pad_token_label_id, mode="test")
-            print(predictions)
+            for i in range(2):
+                np = noun_phrase_extract(data_list[i], predictions[i])
+                print(np)
             return
         result, predictions = evaluate(args, model, tokenizer, labels, pad_token_label_id, mode="test")
-        # print(result)
-        # print(predictions)
-        # return None
-        # Save results
         output_test_results_file = os.path.join(args.output_dir, "test_results.txt")
         with open(output_test_results_file, "w") as writer:
             for key in sorted(result.keys()):
